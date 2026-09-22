@@ -28,6 +28,7 @@
 # 二进制，别碰
 *.jpg  binary
 *.png  binary
+*.gif  binary
 *.mp4  binary
 *.wav  binary
 *.ttc  binary
