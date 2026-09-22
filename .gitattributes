@@ -1,0 +1,35 @@
+# 行尾统一策略
+#
+# 这很重要：仓库在 Windows 上开发，但如果 shell 脚本以 CRLF 提交，
+# 到了 macOS / Linux 上执行会报 `\r: command not found`。
+# 所以 .sh 必须强制 LF，且不允许被 autocrlf 改写。
+
+* text=auto eol=lf
+
+# Shell 脚本：必须 LF
+*.sh   text eol=lf
+*.bash text eol=lf
+
+# Windows 脚本：保持 CRLF（PS 两者都能跑，但 CRLF 更符合 Windows 惯例）
+*.ps1  text eol=crlf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# 源码与文本
+*.py   text eol=lf
+*.md   text eol=lf
+*.txt  text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.srt  text eol=lf
+*.ass  text eol=lf
+
+# 二进制，别碰
+*.jpg  binary
+*.png  binary
+*.mp4  binary
+*.wav  binary
+*.ttc  binary
+*.ttf  binary
+*.bin  binary

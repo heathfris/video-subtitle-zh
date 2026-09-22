@@ -1,0 +1,9 @@
+# video-subtitle-zh 运行依赖
+#
+# faster-whisper 会自动带上 ctranslate2（推理后端）、onnxruntime（VAD 静音检测）、
+# av（音视频解码）、huggingface_hub（模型下载）、tokenizers，这里不重复声明，
+# 避免版本冲突。
+faster-whisper>=1.1.0
+
+# 00_probe_safe_area.py 做底部安全区像素分析用；不做这步的话用不到
+numpy>=1.24

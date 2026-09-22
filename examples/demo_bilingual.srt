@@ -1,0 +1,34 @@
+1
+00:00:00,000 --> 00:00:07,000
+In this video I'm going to show you how to build a retrieval augmented generation pipeline from scratch.
+这期视频我会带你从零搭一套检索增强生成（RAG）流程。
+
+2
+00:00:07,000 --> 00:00:13,100
+First, we split the documents into chunks and embed them into vectors.
+首先，把文档切成小块，再转成向量。
+
+3
+00:00:13,100 --> 00:00:19,130
+Then we store those vectors in a database so we can search them later.
+然后把向量存进数据库，方便之后检索。
+
+4
+00:00:19,130 --> 00:00:25,160
+At query time, we retrieve the most similar chunks and pass them to the model.
+查询的时候，取出最相似的几个片段交给模型。
+
+5
+00:00:25,160 --> 00:00:29,220
+The reason we chunk first is simple, the model can only adjust.
+之所以要先切块，原因很简单——
+
+6
+00:00:29,220 --> 00:00:34,260
+can only attend to a limited context window at a time.
+模型一次能读的上下文是有限的。
+
+7
+00:00:34,260 --> 00:00:36,260
+Let's get started.
+那我们开始。

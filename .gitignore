@@ -1,0 +1,27 @@
+# 虚拟环境（各人机器一份，不入库）
+.venv/
+venv/
+env/
+
+# 运行期产物：模型缓存、抽出的音轨、字幕、压制成片
+.work/
+*.srt
+*.ass
+*_subs/
+*_out/
+
+# 但仓库里自带的示例字幕要保留
+!examples/**/*.srt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 杂项
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
