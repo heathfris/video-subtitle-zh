@@ -36,6 +36,17 @@ Debian/Ubuntu 上 `python3 -m venv` 报错说缺 `ensurepip`，就是没装 `pyt
 export HTTPS_PROXY=http://127.0.0.1:7890    # 端口换成你自己的
 ```
 
+### 安装脚本的中文输出变成乱码
+
+Windows 上如果看到 `鎴愬姛`（"成功"）这类乱码，是终端代码页和脚本输出编码不一致。
+`install.ps1` 已经主动把输出切到 UTF-8，请配合支持 UTF-8 的终端使用：
+
+- Windows Terminal / VS Code 终端：默认就没问题
+- 老式 cmd.exe：先执行 `chcp 65001` 再运行脚本
+
+**这只影响显示，不影响安装结果**——脚本最后的环境自检会照常打印出来，
+按那些 ✓ / ✗ 判断即可。
+
 ### 提示找不到 ffmpeg
 
 脚本不代装 ffmpeg——各平台包管理器差异太大，代装更容易帮倒忙。
