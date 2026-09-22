@@ -11,8 +11,10 @@
 
 用法:
     python scripts/run_all.py <视频>
-    python scripts/run_all.py <视频> --model distil-large-v3 --crf 18
+    python scripts/run_all.py <视频> --model distil-large-v3 --crf 18 --probe
     python scripts/run_all.py <视频> --workdir ./mysubs --soft
+
+`--probe` 会逐句分析画面占用，把字幕只在该避让的句子上抬（见 00_probe_safe_area.py）。
 """
 import argparse
 import json
@@ -56,7 +58,10 @@ def main():
                     help="有 N 卡可用 h264_nvenc 大幅提速")
     ap.add_argument("--soft", action="store_true", help="输出软字幕，不重编码画面")
     ap.add_argument("--probe", action="store_true",
-                    help="先探测画面底部安全区，自动定字幕底边距（推荐动态排版类视频）")
+                    help="先分析画面占用、规划逐句避让（动态排版类视频强烈建议开）")
+    ap.add_argument("--style", choices=("plate", "outline"), default="plate",
+                    help="字幕风格：plate=半透明底板（默认，任何背景都清晰），"
+                         "outline=纯描边（画面最干净，浅色背景对比度偏弱）")
     ap.add_argument("--font", default=None, help="指定中文字体文件")
     ap.add_argument("--no-vad", action="store_true", help="关闭静音切分")
     args = ap.parse_args()
@@ -121,25 +126,22 @@ def main():
 
     # ---------------------------------------------- 3. 生成字幕
     step("步骤 2/3  生成字幕")
-    cmd = [PY, HERE / "02_make_srt.py", str(wd), "--video", str(video)]
+    cmd = [PY, HERE / "02_make_srt.py", str(wd), "--video", str(video),
+           "--style", args.style]
     if args.font:
         cmd += ["--font", args.font]
     if args.probe:
-        print("  先探测底部安全区...", flush=True)
+        print("  先分析画面占用，规划逐句避让...", flush=True)
         r = subprocess.run(
-            [PY, str(HERE / "00_probe_safe_area.py"), str(video), "--json"],
+            [PY, str(HERE / "00_probe_safe_area.py"), str(video),
+             "--segments", str(seg_path), "--plan-out", str(wd / "placement.json")],
             capture_output=True, text=True)
         if r.returncode == 0:
-            try:
-                info = json.loads(r.stdout)
-                mv = info["suggested_margin_v"]
-                print(f"  干净区从画面 {info['clean_area_top_ratio']:.1%} 处开始，"
-                      f"建议 marginV={mv}px，足够={info['enough_room']}")
-                cmd += ["--margin-v", str(mv)]
-            except Exception as e:
-                print(f"  [警告] 安全区结果解析失败（{e}），用默认边距")
+            for line in r.stdout.strip().splitlines()[-6:]:
+                print("  " + line)
         else:
-            print(f"  [警告] 安全区探测失败，用默认边距。{r.stderr.strip()[:200]}")
+            print(f"  [警告] 画面分析失败，所有句子用统一底边距。"
+                  f"{r.stderr.strip()[:200]}")
     run(cmd)
 
     # ---------------------------------------------- 4. 压制

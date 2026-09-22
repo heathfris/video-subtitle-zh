@@ -152,12 +152,27 @@ def write_srt(items, path: Path, bilingual=True):
     path.write_text("\n".join(blocks), encoding="utf-8")
 
 
+# 两种字幕风格。
+#
+# outline（描边）：传统做法，画面最干净。但文字本身没有底色，落在白色/浅色
+#   画面上，浅色文字配细描边会发灰——素材在明暗场景间切换时对比度不稳定。
+# plate（底板）：文字坐在一层半透明黑底上，任何背景都清晰。代价是画面底部
+#   多一层色带。（plate_alpha 是 ASS 的透明度：00=不透明，FF=全透明。）
+STYLE_PRESETS = {
+    "outline": {"border_style": 1, "plate_alpha": None},
+    "plate": {"border_style": 3, "plate_alpha": 0x73},
+}
+
+
 def write_ass(items, path: Path, w, h, bilingual=True,
               limit_en=None, limit_zh=None, font_family="sans-serif",
-              margin_v=None):
+              margin_v=None, style="plate", per_item_margin=None):
     """
     生成带样式的 ASS。字号/描边/边距全部按画面高度按比例推算，
     因此同一个脚本对 720p 和 4K 都能给出合适的观感。
+
+    per_item_margin 若给了，就按句覆盖底边距——配合 00 步的逐句避让，
+    让字幕只在会被画面原文字挡住时才抬高（见 00_probe_safe_area.py）。
     """
     zh_size = max(14, round(h * 0.047))
     en_size = max(12, round(h * 0.034))
@@ -175,8 +190,20 @@ def write_ass(items, path: Path, w, h, bilingual=True,
     limit_en = min(limit_en, 58)
     limit_zh = min(limit_zh, 34)
 
-    zh_outline = max(1.6, round(h * 0.0024, 1))
-    en_outline = max(1.3, round(h * 0.0019, 1))
+    preset = STYLE_PRESETS.get(style) or STYLE_PRESETS["outline"]
+    border_style = preset["border_style"]
+    if preset["plate_alpha"] is None:
+        # 描边模式：Outline 是描边宽度，Shadow 给一点投影
+        zh_pad = max(1.6, round(h * 0.0024, 1))
+        en_pad = max(1.3, round(h * 0.0019, 1))
+        shadow = 1
+        back = "&H96000000"
+    else:
+        # 底板模式：Outline 变成「文字到板边的内边距」，不需要投影
+        zh_pad = max(6, round(zh_size * 0.22))
+        en_pad = max(5, round(en_size * 0.22))
+        shadow = 0
+        back = f"&H{preset['plate_alpha']:02X}000000"
 
     header = (
         "[Script Info]\n"
@@ -191,17 +218,17 @@ def write_ass(items, path: Path, w, h, bilingual=True,
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
         "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: ZH,{font_family},{zh_size},&H00FFFFFF,&H000000FF,&H00000000,&H96000000,"
-        f"0,0,0,0,100,100,0,0,1,{zh_outline},1,2,{mlr},{mlr},{margin_v},1\n"
-        f"Style: EN,{font_family},{en_size},&H00DCDCDC,&H000000FF,&H00000000,&H96000000,"
-        f"0,0,0,0,100,100,0,0,1,{en_outline},1,2,{mlr},{mlr},{margin_v},1\n"
+        f"Style: ZH,{font_family},{zh_size},&H00FFFFFF,&H000000FF,&H00000000,{back},"
+        f"0,0,0,0,100,100,0,0,{border_style},{zh_pad},{shadow},2,{mlr},{mlr},{margin_v},1\n"
+        f"Style: EN,{font_family},{en_size},&H00EAEAEA,&H000000FF,&H00000000,{back},"
+        f"0,0,0,0,100,100,0,0,{border_style},{en_pad},{shadow},2,{mlr},{mlr},{margin_v},1\n"
         "\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
 
     rows = []
-    for it in items:
+    for idx, it in enumerate(items):
         en_lines = wrap_en(it["en"], limit_en)
         zh_lines = wrap_zh(it["zh"], limit_zh)
         if bilingual:
@@ -209,8 +236,10 @@ def write_ass(items, path: Path, w, h, bilingual=True,
                     + "\\N{\\rZH}" + "\\N".join(zh_lines))
         else:
             text = "{\\rZH}" + "\\N".join(zh_lines)
+        # 事件自带 MarginV 字段，可逐句覆盖样式里的底边距
+        mv = margin_v if per_item_margin is None else per_item_margin[idx]
         rows.append(
-            f"Dialogue: 0,{fmt_ass(it['start'])},{fmt_ass(it['end'])},ZH,,0,0,0,,{text}")
+            f"Dialogue: 0,{fmt_ass(it['start'])},{fmt_ass(it['end'])},ZH,,0,0,{mv},,{text}")
 
     path.write_text(header + "\n".join(rows) + "\n", encoding="utf-8-sig")
     return limit_en, limit_zh
@@ -241,6 +270,34 @@ def load_translations(path: Path, expect: int):
     return list(zh)
 
 
+def load_placement(wd: Path, expect: int, play_res_y: int, disabled=False):
+    """
+    读 00 步产出的逐句避让结果。没有就返回 None，全部句子用统一样式底边距。
+
+    placement.json 里的 margin_v 是按原片高度算出来的，这里按 ASS 的 PlayResY
+    等比缩放——`--video` 没给时 PlayRes 默认 1920x1080，与实测分辨率不一致，
+    不缩放就会错位。
+    """
+    if disabled:
+        return None
+    p = wd / "placement.json"
+    if not p.exists():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        entries = data["entries"]
+        src_h = int(data["resolution"][1])
+    except Exception as e:
+        print(f"  [警告] {p.name} 读不了（{e}），改用统一底边距", file=sys.stderr)
+        return None
+    if src_h <= 0 or len(entries) != expect:
+        print(f"  [警告] {p.name} 有 {len(entries)} 条、字幕有 {expect} 条，"
+              f"对不上，改用统一底边距", file=sys.stderr)
+        return None
+    k = play_res_y / src_h
+    return [max(0, round(int(e["margin_v"]) * k)) for e in entries]
+
+
 def main():
     ap = argparse.ArgumentParser(description="合成中英双语字幕（SRT + ASS）")
     ap.add_argument("workdir", help="01 步产出的工作目录")
@@ -251,6 +308,11 @@ def main():
     ap.add_argument("--font-name", default=None, help="指定 ASS 里写的字体族名")
     ap.add_argument("--margin-v", type=int, default=None,
                     help="字幕距画面底部的像素；不填则自适应")
+    ap.add_argument("--style", choices=("plate", "outline"), default="plate",
+                    help="字幕风格：plate=半透明底板（默认，任何背景都清晰），"
+                         "outline=纯描边（画面最干净，但浅色背景上对比度偏弱）")
+    ap.add_argument("--flat-margin", action="store_true",
+                    help="忽略 placement.json，所有句子用同一个底边距")
     args = ap.parse_args()
 
     wd = Path(args.workdir).expanduser().resolve()
@@ -275,17 +337,31 @@ def main():
 
     w, h = probe_size(Path(args.video)) if args.video else (1920, 1080)
 
+    per_item = load_placement(wd, len(items), h,
+                              disabled=args.flat_margin or args.margin_v is not None)
+
     write_srt(items, wd / "bilingual.srt", bilingual=True)
     lim_en, lim_zh = write_ass(items, wd / "bilingual.ass", w, h, bilingual=True,
                                limit_en=args.limit_en, limit_zh=args.limit_zh,
-                               font_family=font_family, margin_v=args.margin_v)
+                               font_family=font_family, margin_v=args.margin_v,
+                               style=args.style, per_item_margin=per_item)
     write_srt(items, wd / "zh.srt", bilingual=False)
     write_ass(items, wd / "zh.ass", w, h, bilingual=False,
               limit_en=args.limit_en, limit_zh=args.limit_zh,
-              font_family=font_family, margin_v=args.margin_v)
+              font_family=font_family, margin_v=args.margin_v,
+              style=args.style, per_item_margin=per_item)
 
     print(f"\n完成，共 {len(items)} 句 | 画面 {w}x{h} | "
-          f"折行宽 英 {lim_en} / 中 {lim_zh}")
+          f"折行宽 英 {lim_en} / 中 {lim_zh} | 风格 {args.style}")
+    if per_item is None:
+        print("  底边距：全文统一"
+              + ("（--flat-margin 指定）" if args.flat_margin else
+                 "（未找到 placement.json，可先跑 00 步做逐句避让）"))
+    else:
+        uniq = sorted(set(per_item))
+        moved = sum(1 for m in per_item if m > min(uniq))
+        print(f"  底边距：逐句避让已启用，{moved}/{len(per_item)} 句上移避让；"
+              f"用到的档位 {uniq}")
     for name in ("bilingual.srt", "zh.srt", "bilingual.ass", "zh.ass"):
         p = wd / name
         print(f"  {name:<16} {p.stat().st_size / 1024:6.1f} KB")
